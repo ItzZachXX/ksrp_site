@@ -88,7 +88,9 @@
   function modal({ title, sub, fields, confirm, danger, onSubmit }) {
     const inputs = {};
     const body = fields.map((f) => {
-      const input = f.long ? h('textarea', { placeholder: f.placeholder || '' }) : h('input', { placeholder: f.placeholder || '', maxlength: f.max || 500 });
+      const input = f.options
+        ? h('select', {}, f.options.map(([v, l]) => h('option', { value: v, text: l })))
+        : f.long ? h('textarea', { placeholder: f.placeholder || '' }) : h('input', { placeholder: f.placeholder || '', maxlength: f.max || 500, value: f.value || '' });
       inputs[f.name] = input;
       return h('label', { class: 'field' }, h('span', { text: f.label }), input);
     });
@@ -132,6 +134,7 @@
 
   // ---------- views ----------
   const views = {};
+  const P = (window.KSRP_PORTAL = { h, api, act, toast, modal, stat, empty, table, head, put, dt, ago, duration, svg, ICONS, state, views, API });
 
   views.overview = async (el) => {
     const o = await api('GET', '/api/staff/overview');
@@ -401,16 +404,20 @@
     ['ingame', 'In-game'], ['logs', 'Server logs'], ['audit', 'Audit log', 'admin'],
   ];
   let mainEl;
+  const STAFF_VIEWS = ['overview', 'sessions', 'players', 'warnings', 'ingame', 'logs', 'audit'];
+  const isStaffLevel = () => state.me.level === 'staff' || state.me.level === 'admin';
 
   function parseHash() {
-    const [path, qs] = (location.hash.replace(/^#\/?/, '') || 'overview').split('?');
-    return { name: views[path] ? path : 'overview', query: new URLSearchParams(qs || '') };
+    const home = isStaffLevel() ? 'overview' : 'cad';
+    const [path, qs] = (location.hash.replace(/^#\/?/, '') || home).split('?');
+    return { name: views[path] ? path : home, query: new URLSearchParams(qs || '') };
   }
 
   async function render() {
     const { name, query } = parseHash();
     document.querySelectorAll('.side nav a[data-v]').forEach((a) => a.classList.toggle('active', a.dataset.v === name));
-    if (name === 'audit' && state.me.level !== 'admin') return (location.hash = '#/overview');
+    if (name === 'audit' && state.me.level !== 'admin') return (location.hash = isStaffLevel() ? '#/overview' : '#/cad');
+    if (!isStaffLevel() && STAFF_VIEWS.includes(name)) return (location.hash = '#/cad');
     mainEl.replaceChildren(h('div', { class: 'loading', text: 'Loading...' }));
     const fresh = h('div', {});
     try {
@@ -433,10 +440,10 @@
       h('aside', { class: 'side' },
         h('a', { class: 'brand', href: '/' }, h('img', { src: '/logo.png', alt: '' }), h('span', { text: 'Staff Portal' })),
         h('nav', {},
-          h('div', { class: 'group', text: 'Staff' }),
-          NAV.filter(([, , need]) => !need || state.me.level === 'admin').map(([id, label]) => h('a', { href: `#/${id}`, 'data-v': id }, svg(ICONS[id]), label)),
-          h('div', { class: 'group', text: 'Coming soon' }),
-          h('a', { href: '#/overview', class: 'muted', onclick: (e) => { e.preventDefault(); toast('The CAD is the next phase of the portal.'); } }, svg(ICONS.cad), 'CAD')),
+          isStaffLevel() ? h('div', { class: 'group', text: 'Staff' }) : null,
+          isStaffLevel() ? NAV.filter(([, , need]) => !need || state.me.level === 'admin').map(([id, label]) => h('a', { href: `#/${id}`, 'data-v': id }, svg(ICONS[id]), label)) : null,
+          h('div', { class: 'group', text: 'CAD' }),
+          (P.cadNav ? P.cadNav() : []).map(([id, label, icon]) => h('a', { href: `#/${id}`, 'data-v': id }, svg(ICONS[icon] || ICONS.cad), label))),
         h('div', { class: 'userchip' }, avatar, h('div', { class: 'who' }, h('b', { text: state.me.name }), h('small', { text: state.me.level })), logout)),
       mainEl));
     window.addEventListener('hashchange', render);
@@ -463,8 +470,9 @@
     }
     if (!state.me.loggedIn) return loginScreen();
     if (!state.me.inGuild) return loginScreen('noaccess', 'You are not in the Kentucky State Roleplay Discord server.');
-    if (state.me.level === 'none') return loginScreen('noaccess', `Signed in as ${state.me.name}, but this portal is for the Staff Team. Department tools will arrive with the CAD.`);
-    state.cfg = await api('GET', '/api/staff/config');
+    if (state.me.level === 'none') return loginScreen('noaccess', `Signed in as ${state.me.name}, but you need a department role or the Staff Team role to use this portal.`);
+    state.cfg = isStaffLevel() ? await api('GET', '/api/staff/config') : {};
+    if (P.cadInit) await P.cadInit().catch(() => {});
     shell();
   }
   boot();
